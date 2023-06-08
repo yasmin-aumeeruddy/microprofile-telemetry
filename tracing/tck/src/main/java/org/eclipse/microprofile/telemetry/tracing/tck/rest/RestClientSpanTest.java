@@ -62,6 +62,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
+import io.opentelemetry.instrumentation.annotations.SpanAttribute;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import io.opentelemetry.sdk.autoconfigure.spi.traces.ConfigurableSpanExporterProvider;
 import io.opentelemetry.sdk.trace.data.SpanData;
@@ -199,6 +200,41 @@ class RestClientSpanTest extends Arquillian {
 
         assertEquals(client.getTraceId(), server.getTraceId());
         assertEquals(server.getParentSpanId(), client.getSpanId());
+    }
+
+    @Test
+    void spanChildWithParameter() {
+        Response response = client.spanChildWithParameter("testParameterValue");
+        Assert.assertEquals(response.getStatus(), HTTP_OK);
+
+        List<SpanData> spans = spanExporter.getFinishedSpanItems(3);
+
+        SpanData internal = spans.get(0);
+        Assert.assertEquals(internal.getKind(), INTERNAL);
+        Assert.assertEquals(internal.getName(), "SpanBean.spanChildWithParameter");
+        Assert.assertEquals(internal.getAttributes().get(stringKey("testParameter")), "testParameterValue");
+
+        SpanData server = spans.get(1);
+        Assert.assertEquals(server.getKind(), SERVER);
+        Assert.assertEquals(server.getName(), url.getPath() + "span/childParameterWithParameter/{name}");
+        Assert.assertEquals(server.getAttributes().get(HTTP_STATUS_CODE).intValue(), HTTP_OK);
+        Assert.assertEquals(server.getAttributes().get(HTTP_METHOD), HttpMethod.GET);
+        Assert.assertEquals(server.getAttributes().get(HTTP_SCHEME), "http");
+        Assert.assertEquals(server.getAttributes().get(HTTP_TARGET),
+                url.getPath() + "span/childParameterWithParameter/testParameterValue");
+
+        SpanData client = spans.get(2);
+        Assert.assertEquals(client.getKind(), CLIENT);
+        Assert.assertEquals(client.getName(), "HTTP GET");
+        Assert.assertEquals(client.getAttributes().get(HTTP_STATUS_CODE).intValue(), HTTP_OK);
+        Assert.assertEquals(client.getAttributes().get(HTTP_METHOD), HttpMethod.GET);
+        Assert.assertEquals(client.getAttributes().get(HTTP_URL),
+                url.toString() + "span/childParameterWithParameter/testParameterValue");
+
+        Assert.assertEquals(internal.getTraceId(), client.getTraceId());
+        Assert.assertEquals(server.getTraceId(), client.getTraceId());
+        Assert.assertEquals(server.getSpanId(), internal.getParentSpanId());
+        Assert.assertEquals(client.getSpanId(), server.getParentSpanId());
     }
 
     @Test
@@ -362,6 +398,13 @@ class RestClientSpanTest extends Arquillian {
         }
 
         @GET
+        @Path("/span/childParameterWithParameter/{name}")
+        public Response spanChildWithParameter(@PathParam(value = "name") String name) {
+            spanBean.spanChildWithParameter(name);
+            return Response.ok().build();
+        }
+
+        @GET
         @Path("/span/current")
         public Response spanCurrent() {
             span.setAttribute("tck.current.key", "tck.current.value");
@@ -395,6 +438,11 @@ class RestClientSpanTest extends Arquillian {
         void spanChild() {
 
         }
+
+        @WithSpan
+        void spanChildWithParameter(@SpanAttribute("testParameter") String testParameter) {
+
+        }
     }
 
     @RegisterRestClient(configKey = "client")
@@ -415,6 +463,10 @@ class RestClientSpanTest extends Arquillian {
         @GET
         @Path("/span/child")
         Response spanChild();
+
+        @GET
+        @Path("/span/childParameterWithParameter/{name}")
+        Response spanChildWithParameter(@PathParam(value = "name") String name);
 
         @GET
         @Path("/span/current")
