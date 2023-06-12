@@ -40,8 +40,6 @@ import static org.testng.Assert.assertTrue;
 import java.net.URISyntaxException;
 import java.net.URL;
 
-import io.opentelemetry.api.common.AttributeKey;
-import io.opentelemetry.api.trace.SpanKind;
 import org.eclipse.microprofile.rest.client.RestClientBuilder;
 import org.eclipse.microprofile.rest.client.RestClientDefinitionException;
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
@@ -58,7 +56,9 @@ import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
@@ -129,7 +129,6 @@ class RestClientSpanTest extends Arquillian {
         assertEquals(client.getTraceId(), server.getTraceId());
         assertEquals(server.getParentSpanId(), client.getSpanId());
     }
-
 
     @Test
     void spanName() {
@@ -204,37 +203,26 @@ class RestClientSpanTest extends Arquillian {
 
     @Test
     void spanChildWithParameter() {
-        Response response = client.spanChildWithParameter("testParameterValue");
-        Assert.assertEquals(response.getStatus(), HTTP_OK);
+        Response response = client.spanChild();
+        assertResponseStatus(response, OK);
 
-        List<SpanData> spans = spanExporter.getFinishedSpanItems(3);
+        spanExporter.assertSpanCount(3);
 
-        SpanData internal = spans.get(0);
-        Assert.assertEquals(internal.getKind(), INTERNAL);
-        Assert.assertEquals(internal.getName(), "SpanBean.spanChildWithParameter");
-        Assert.assertEquals(internal.getAttributes().get(stringKey("testParameter")), "testParameterValue");
+        SpanData internal = spanExporter.getFirst(SpanKind.INTERNAL);
+        assertEquals(internal.getKind(), SpanKind.INTERNAL);
+        assertEquals(internal.getName(), "SpanBean.spanChildWithParameter");
+        assertEquals(internal.getAttributes().get(AttributeKey.stringKey("testParameter")), "testParameterValue");
 
-        SpanData server = spans.get(1);
-        Assert.assertEquals(server.getKind(), SERVER);
-        Assert.assertEquals(server.getName(), url.getPath() + "span/childParameterWithParameter/{name}");
-        Assert.assertEquals(server.getAttributes().get(HTTP_STATUS_CODE).intValue(), HTTP_OK);
-        Assert.assertEquals(server.getAttributes().get(HTTP_METHOD), HttpMethod.GET);
-        Assert.assertEquals(server.getAttributes().get(HTTP_SCHEME), "http");
-        Assert.assertEquals(server.getAttributes().get(HTTP_TARGET),
-                url.getPath() + "span/childParameterWithParameter/testParameterValue");
+        SpanData server = spanExporter.getFirst(SpanKind.SERVER);
+        assertServerSpan(server, "span/childParameterWithParameter/testParameterValue");
 
-        SpanData client = spans.get(2);
-        Assert.assertEquals(client.getKind(), CLIENT);
-        Assert.assertEquals(client.getName(), "HTTP GET");
-        Assert.assertEquals(client.getAttributes().get(HTTP_STATUS_CODE).intValue(), HTTP_OK);
-        Assert.assertEquals(client.getAttributes().get(HTTP_METHOD), HttpMethod.GET);
-        Assert.assertEquals(client.getAttributes().get(HTTP_URL),
-                url.toString() + "span/childParameterWithParameter/testParameterValue");
+        SpanData client = spanExporter.getFirst(SpanKind.CLIENT);
+        assertClientSpan(client, "span/childParameterWithParameter/testParameterValue");
 
-        Assert.assertEquals(internal.getTraceId(), client.getTraceId());
-        Assert.assertEquals(server.getTraceId(), client.getTraceId());
-        Assert.assertEquals(server.getSpanId(), internal.getParentSpanId());
-        Assert.assertEquals(client.getSpanId(), server.getParentSpanId());
+        assertEquals(internal.getTraceId(), client.getTraceId());
+        assertEquals(server.getTraceId(), client.getTraceId());
+        assertEquals(server.getSpanId(), internal.getParentSpanId());
+        assertEquals(client.getSpanId(), server.getParentSpanId());
     }
 
     @Test
